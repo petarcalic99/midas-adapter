@@ -19,7 +19,7 @@ contract SpectraWrappedMidasVault is Spectra4626Wrapper {
     using DecimalsCorrectionLibrary for uint256;
     using SafeERC20 for IERC20;
 
-    uint256 private UNDELRYING_DECIMALS;
+    uint256 private UNDERLYING_DECIMALS;
     address private midasDeposit;
     address private midasRedeem;
     IDataFeed private mTokenDataFeed;
@@ -41,8 +41,8 @@ contract SpectraWrappedMidasVault is Spectra4626Wrapper {
         address _midasDeposit,
         address _initAuth
     ) external initializer {
-        __Spectra4626Wrapper_init(_asset, _midasToken, _initAuth);
-        UNDELRYING_DECIMALS = IERC20Metadata(_asset).decimals();
+        __Spectra4626Wrapper_init(_asset, _midasToken, _initAuth);  
+        UNDERLYING_DECIMALS = IERC20Metadata(_asset).decimals();
         midasDeposit = _midasDeposit;
         midasRedeem = _midasRedeem;
         mTokenDataFeed = IVault(_midasDeposit).mTokenDataFeed();
@@ -117,8 +117,8 @@ contract SpectraWrappedMidasVault is Spectra4626Wrapper {
 
     /// @dev See {IERC4626-deposit}.
     function deposit(
-        uint256 /*assets*/,
-        address /*receiver*/
+        uint256 assets,
+        address receiver
     ) public override(IERC4626, ERC4626Upgradeable) returns (uint256) {
         revert NotImplemented();
     }
@@ -185,10 +185,12 @@ contract SpectraWrappedMidasVault is Spectra4626Wrapper {
     function _midasVaultConvertToShares(
         uint256 assets
     ) internal view returns (uint256) {
+        uint256 amountTokenInBase18 = assets.convertToBase18(UNDERLYING_DECIMALS); 
+
         IVault.TokenConfig memory tokenConfig = IVault(midasDeposit).tokensConfig(asset());
         uint256 rate = _getTokenRate(tokenConfig.dataFeed, tokenConfig.stable);
         require(rate > 0, "rate zero");
-        uint256 amountInUsd = (assets * rate) / (UNIT);
+        uint256 amountInUsd = (amountTokenInBase18 * rate) / (UNIT);
 
         uint256 mTokenRate = _getTokenRate(address(mTokenDataFeed), false);
         require(mTokenRate > 0, "rate zero");
@@ -210,7 +212,7 @@ contract SpectraWrappedMidasVault is Spectra4626Wrapper {
         uint256 tokenOutRate = _getTokenRate(tokenConfig.dataFeed, tokenConfig.stable);
         require(tokenOutRate > 0, "rate zero");
 
-        uint256 amountTokenOut = _truncate((shares * mTokenRate) / tokenOutRate, UNDELRYING_DECIMALS);
+        uint256 amountTokenOut = ((shares * mTokenRate) / tokenOutRate).convertFromBase18(UNDERLYING_DECIMALS);
         
         return amountTokenOut;
     }
@@ -232,7 +234,7 @@ contract SpectraWrappedMidasVault is Spectra4626Wrapper {
         uint256 tokenOutRate = _getTokenRate(tokenConfig.dataFeed, tokenConfig.stable);
         require(tokenOutRate > 0, "rate zero");
 
-        uint256 amountTokenOut = _truncate((sharesWithoutFee * mTokenRate) / tokenOutRate, UNDELRYING_DECIMALS);
+        uint256 amountTokenOut = ((sharesWithoutFee * mTokenRate) / tokenOutRate).convertFromBase18(UNDERLYING_DECIMALS);
         
         return amountTokenOut;
     }
@@ -254,19 +256,5 @@ contract SpectraWrappedMidasVault is Spectra4626Wrapper {
         if (stable) return STABLECOIN_RATE;
 
         return rate;
-    }
-
-    /**
-     * @dev convert value to inputted decimals precision
-     * @param value value for format
-     * @param decimals decimals
-     * @return converted amount
-     */
-    function _truncate(uint256 value, uint256 decimals)
-        internal
-        pure
-        returns (uint256)
-    {
-        return value.convertFromBase18(decimals).convertToBase18(decimals);
     }
 }

@@ -3,7 +3,7 @@
  Description of the ERC4626 wrapper for the midas mTokens. The wrapper allows to interact with the any mToken through the ERC4626 interface, making it compatible for deploying a Principal Token contract.
 
 ## Important note
-Even though the mTokens support instant deposits and redeems, we decided to revert them here as they might become unavailble for some periods of time.
+Even though the mTokens support instant deposits and redeems, we decided to revert them here as they might become unavailble for some periods of time. In the commits you may notice an the deposit was added but for simplicity of the wrapper we decided to remove it in the end
 
  ## Architecture
 

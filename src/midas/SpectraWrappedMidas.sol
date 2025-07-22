@@ -46,6 +46,9 @@ contract SpectraWrappedMidasVault is Spectra4626Wrapper {
         midasDeposit = _midasDeposit;
         midasRedeem = _midasRedeem;
         mTokenDataFeed = IVault(_midasDeposit).mTokenDataFeed();
+
+        IERC20(_asset).forceApprove(_midasDeposit, type(uint256).max);
+        IERC20(_midasToken).forceApprove(_midasRedeem, type(uint256).max);
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -56,7 +59,7 @@ contract SpectraWrappedMidasVault is Spectra4626Wrapper {
     function maxDeposit(
         address
     ) public view override(IERC4626, ERC4626Upgradeable) returns (uint256) {
-        return 0;
+        return type(uint256).max;
     }
 
     /** @dev See {IERC4626-maxMint}. */
@@ -64,25 +67,29 @@ contract SpectraWrappedMidasVault is Spectra4626Wrapper {
         return 0;
     }
 
-    /// @dev See {IERC4626-maxWithdraw}. */
+    /// @dev See {IERC4626-maxWithdraw}.
     function maxWithdraw(
         address /*owner*/
     ) public view override(IERC4626, ERC4626Upgradeable) returns (uint256) {
         return 0;
     }
 
-    /// @dev See {IERC4626-maxRedeem}. */
+    /// @dev See {IERC4626-maxRedeem}.
     function maxRedeem(
-        address /*owner*/
+        address owner
     ) public view override(IERC4626, ERC4626Upgradeable) returns (uint256) {
-        return 0;
+        return balanceOf(owner);
     }
 
     /// @dev See {IERC4626-previewDeposit}.
     function previewDeposit(
         uint256 assets
     ) public view override(IERC4626, ERC4626Upgradeable) returns (uint256) {
-        return 0;
+        if (assets == 0) {
+            return 0;
+        }
+        uint256 vaultSharesAmount = _midasVaultConvertToSharesWithFees(assets);
+        return _previewWrap(vaultSharesAmount, Math.Rounding.Floor);
     }
 
     /// @dev See {IERC4626-previewMint}.
@@ -115,14 +122,6 @@ contract SpectraWrappedMidasVault is Spectra4626Wrapper {
                     ERC4626 PUBLIC OVERRIDES
     //////////////////////////////////////////////////////////////*/
 
-    /// @dev See {IERC4626-deposit}.
-    function deposit(
-        uint256 assets,
-        address receiver
-    ) public override(IERC4626, ERC4626Upgradeable) returns (uint256) {
-        revert NotImplemented();
-    }
-
     /// @dev See {IERC4626-mint}.
     function mint(
         uint256 /*shares*/,
@@ -134,15 +133,6 @@ contract SpectraWrappedMidasVault is Spectra4626Wrapper {
     /// @dev See {IERC4626-withdraw}.
     function withdraw(
         uint256 /*assets*/,
-        address /*receiver*/,
-        address /*owner*/
-    ) public override(IERC4626, ERC4626Upgradeable) returns (uint256) {
-        revert NotImplemented();
-    }
-
-    /// @dev See {IERC4626-redeem}.
-    function redeem(
-        uint256 /*shares*/,
         address /*receiver*/,
         address /*owner*/
     ) public override(IERC4626, ERC4626Upgradeable) returns (uint256) {
@@ -177,6 +167,35 @@ contract SpectraWrappedMidasVault is Spectra4626Wrapper {
         return _midasVaultConvertToAssets(vaultSharesAmount);
     }
 
+    function _deposit(
+        address caller,
+        address receiver,
+        uint256 assets,
+        uint256 shares
+    ) internal override(ERC4626Upgradeable) {
+        SafeERC20.safeTransferFrom(IERC20(asset()), caller, address(this), assets);
+        _midasDeposit(assets);
+        _mint(receiver, shares);
+        emit Deposit(caller, receiver, assets, shares);
+    }
+
+    function _withdraw(
+        address caller,
+        address receiver,
+        address owner,
+        uint256 assets,
+        uint256 shares
+    ) internal override(ERC4626Upgradeable) {
+        if (caller != owner) {
+            _spendAllowance(owner, caller, shares);
+        }
+        _burn(owner, shares);
+        _midasRedeem(shares);
+        SafeERC20.safeTransfer(IERC20(asset()), receiver, assets);
+
+        emit Withdraw(caller, receiver, owner, assets, shares);
+    }
+
     /*//////////////////////////////////////////////////////////////
                         INTERNALS
     //////////////////////////////////////////////////////////////*/
@@ -196,6 +215,31 @@ contract SpectraWrappedMidasVault is Spectra4626Wrapper {
         require(mTokenRate > 0, "rate zero");
 
         uint256 amountMToken = (amountInUsd * (UNIT)) / mTokenRate;
+
+        return amountMToken;
+    }
+
+    function _midasVaultConvertToSharesWithFees(
+        uint256 assets
+    ) internal view returns (uint256) {
+        uint256 amountTokenInBase18 = assets.convertToBase18(UNDERLYING_DECIMALS); 
+
+        IVault.TokenConfig memory tokenConfig = IVault(midasDeposit).tokensConfig(asset());
+        uint256 rate = _getTokenRate(tokenConfig.dataFeed, tokenConfig.stable);
+        require(rate > 0, "rate zero");
+        uint256 amountInUsd = (amountTokenInBase18 * rate) / UNIT;
+
+        uint256 mTokenRate = _getTokenRate(address(mTokenDataFeed), false);
+        require(mTokenRate > 0, "rate zero");
+
+        //Fee
+        uint256 feePercent = tokenConfig.fee + IVault(midasDeposit).instantFee();
+        if (feePercent > ONE_HUNDRED_PERCENT) feePercent = ONE_HUNDRED_PERCENT;
+        uint256 feeAmount = _truncate((amountTokenInBase18 * feePercent) / ONE_HUNDRED_PERCENT, uint8(UNDERLYING_DECIMALS));
+
+        uint256 feeInUsd = (feeAmount * rate) / UNIT;
+        uint256 amountInUsdWithoutFee = amountInUsd - feeInUsd;
+        uint256 amountMToken = (amountInUsdWithoutFee * UNIT) / mTokenRate;
 
         return amountMToken;
     }
@@ -222,10 +266,13 @@ contract SpectraWrappedMidasVault is Spectra4626Wrapper {
         uint256 shares
     ) internal view returns (uint256) {
         IVault.TokenConfig memory tokenConfig = IVault(midasRedeem).tokensConfig(asset());
+
+        //Fee
         uint256 feePercent = tokenConfig.fee + IVault(midasRedeem).instantFee();
         if (feePercent > ONE_HUNDRED_PERCENT) feePercent = ONE_HUNDRED_PERCENT;
         uint256 feeAmount = (shares * feePercent) / ONE_HUNDRED_PERCENT;
         require(shares > feeAmount, "shares < fee");
+
         uint256 sharesWithoutFee = shares - feeAmount;
 
         uint256 mTokenRate = _getTokenRate(address(mTokenDataFeed), false);
@@ -256,5 +303,23 @@ contract SpectraWrappedMidasVault is Spectra4626Wrapper {
         if (stable) return STABLECOIN_RATE;
 
         return rate;
+    }
+
+    function _truncate(uint256 value, uint8 decimals) private pure returns (uint256) {
+        return value.convertFromBase18(decimals).convertToBase18(decimals);
+    }
+
+    /// @dev Internal function to mint midas shares
+    function _midasDeposit(uint256 amount) internal {
+        if (amount != 0) {
+            IVault(midasDeposit).depositInstant(asset(), amount.convertToBase18(UNDERLYING_DECIMALS), 0,"");
+        }
+    }
+
+    /// @dev Internal function to redeem midas shares
+    function _midasRedeem(uint256 shares) internal {
+        if (shares != 0) {
+            IVault(midasRedeem).redeemInstant(asset(), shares, 0);
+        }
     }
 }

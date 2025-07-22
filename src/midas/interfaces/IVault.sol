@@ -15,6 +15,24 @@ interface IVault {
         bool stable;
     }
 
+        /**
+     * @notice Allows instant deposits of a specified token.
+     * @dev Implementations must handle appropriate access control,
+     *      pause checks, blacklist checks, etc.
+     * @param tokenIn The address of the token being deposited
+     * @param amountToken The amount of `tokenIn` to deposit
+     * @param minReceiveAmount The minimum amount of deposit tokens to receive
+     * @param referrerId An optional referrer identifier
+     */
+    function depositInstant(
+        address tokenIn,
+        uint256 amountToken,
+        uint256 minReceiveAmount,
+        bytes32 referrerId
+    ) external;
+
+    function redeemInstant(address tokenOut, uint256 amountMTokenIn, uint256 minReceiveAmount) external;
+
     /**
      * @notice Retrieves the TokenConfig for a given token
      * @param token The asset token address

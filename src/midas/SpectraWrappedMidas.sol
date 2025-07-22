@@ -312,14 +312,15 @@ contract SpectraWrappedMidasVault is Spectra4626Wrapper {
     /// @dev Internal function to mint midas shares
     function _midasDeposit(uint256 amount) internal {
         if (amount != 0) {
-            IVault(midasDeposit).depositInstant(asset(), amount.convertToBase18(UNDERLYING_DECIMALS), 0,"");
+            IVault(midasDeposit).depositInstant(asset(), amount.convertToBase18(UNDERLYING_DECIMALS), _midasVaultConvertToSharesWithFees(amount),"");
         }
     }
 
     /// @dev Internal function to redeem midas shares
     function _midasRedeem(uint256 shares) internal {
         if (shares != 0) {
-            IVault(midasRedeem).redeemInstant(asset(), shares, 0);
+
+            IVault(midasRedeem).redeemInstant(asset(), shares, _midasVaultConvertToAssetsWithFees(shares));
         }
     }
 }

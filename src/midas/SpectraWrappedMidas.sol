@@ -189,8 +189,9 @@ contract SpectraWrappedMidasVault is Spectra4626Wrapper {
         if (caller != owner) {
             _spendAllowance(owner, caller, shares);
         }
+        uint256 mTokenShares = _previewUnwrap(shares, Math.Rounding.Floor);
         _burn(owner, shares);
-        _midasRedeem(shares);
+        _midasRedeem(mTokenShares);
         SafeERC20.safeTransfer(IERC20(asset()), receiver, assets);
 
         emit Withdraw(caller, receiver, owner, assets, shares);
@@ -299,7 +300,6 @@ contract SpectraWrappedMidasVault is Spectra4626Wrapper {
     {
         // @dev if dataFeed returns rate, all peg checks passed
         uint256 rate = IDataFeed(dataFeed).getDataInBase18();
-
         if (stable) return STABLECOIN_RATE;
 
         return rate;
@@ -319,7 +319,6 @@ contract SpectraWrappedMidasVault is Spectra4626Wrapper {
     /// @dev Internal function to redeem midas shares
     function _midasRedeem(uint256 shares) internal {
         if (shares != 0) {
-
             IVault(midasRedeem).redeemInstant(asset(), shares, _midasVaultConvertToAssetsWithFees(shares));
         }
     }
